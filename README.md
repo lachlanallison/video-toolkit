@@ -1,6 +1,6 @@
 # Video Toolkit
 
-**Live app:** `https://lachlanallison.github.io/video-toolkit/`
+**Live app:** [https://lachlanallison.github.io/video-toolkit/](https://lachlanallison.github.io/video-toolkit/)
 
 Fast, browser-based video tools powered by [ffmpeg.wasm](https://ffmpegwasm.netlify.app/). Files stay on your machine.
 
@@ -31,7 +31,7 @@ python -m http.server 8000
 1. Push this repo to GitHub.
 2. Repo Settings -> Pages -> Deploy from branch.
 3. Select `main` and `/ (root)`.
-4. Open `https://lachlanallison.github.io/video-toolkit/`.
+4. Open [https://lachlanallison.github.io/video-toolkit/](https://lachlanallison.github.io/video-toolkit/).
 
 ## Notes
 

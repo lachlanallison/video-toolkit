@@ -4,6 +4,25 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Video Toolkit</title>
+<meta name="description" content="Video Toolkit runs in your browser to shrink, convert, extract, and trim videos with automatic WebCodecs acceleration and ffmpeg.wasm fallback. No uploads required." />
+<meta name="robots" content="index,follow,max-image-preview:large" />
+<meta name="theme-color" content="#0f1115" />
+<meta name="application-name" content="Video Toolkit" />
+<link rel="canonical" href="https://lachlanallison.github.io/video-toolkit/" />
+<link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+<meta property="og:type" content="website" />
+<meta property="og:title" content="Video Toolkit" />
+<meta property="og:description" content="Shrink, convert, extract, and trim video locally in your browser. Uses WebCodecs hardware acceleration when possible and falls back to ffmpeg.wasm." />
+<meta property="og:url" content="https://lachlanallison.github.io/video-toolkit/" />
+<meta property="og:image" content="https://lachlanallison.github.io/video-toolkit/og-image.svg" />
+<meta property="og:image:type" content="image/svg+xml" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:site_name" content="Video Toolkit" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Video Toolkit" />
+<meta name="twitter:description" content="In-browser video toolkit with hardware acceleration when available and reliable ffmpeg fallback." />
+<meta name="twitter:image" content="https://lachlanallison.github.io/video-toolkit/og-image.svg" />
 <!-- Cross-Origin Isolation via service worker. Enables SharedArrayBuffer
      so we can use the multi-threaded + SIMD ffmpeg-core build (2–6× faster).
      Must be loaded before any other script and before any subresource that
@@ -1715,6 +1734,23 @@
     return ext === "mp4" || ext === "mov" || ext === "m4v";
   }
 
+  function shouldTryVideoElementFallback(primaryError) {
+    if (!primaryError) return true;
+    const msg = String(primaryError.message || primaryError || "").toLowerCase();
+    const isCodecUnsupported = msg.includes("videodecoder: codec not supported");
+    if (!isCodecUnsupported) return false;
+
+    const isHevc = msg.includes("hvc1") || msg.includes("hev1") || msg.includes("h265") || msg.includes("hevc");
+    if (!isHevc) return false;
+
+    // The <video> fallback is most useful on Firefox for HEVC inputs where
+    // VideoDecoder rejects but OS-level playback still works. On Chromium this
+    // path often falls back to very slow software encode.
+    const ua = navigator.userAgent || "";
+    const isFirefox = /firefox/i.test(ua) && !/seamonkey/i.test(ua);
+    return isFirefox;
+  }
+
   // Compute target bitrate for the WebCodecs encode. For "shrink" we use
   // the computed videoKbps; for "convert" we map CRF to a reasonable ABR.
   function pickWebCodecsBitrate(ctx) {
@@ -2039,16 +2075,42 @@
       // reasonable settings. Bail out so the user isn't stuck waiting.
       const MIN_FPS = 5;
       const GUARD_SAMPLE_AFTER_SEC = 6;
+      // Additional wall-clock guard: if frame callbacks are extremely sparse
+      // (common when decode/encode silently falls back to software), we may not
+      // get enough onFrame calls to trip the fps guard quickly.
+      const MAX_WALLCLOCK_SEC = 20;
+      const MIN_FRAMES_BY_TIMEOUT = 45;
       let lastFpsUpdate = 0;
       await new Promise((resolve, reject) => {
+        let settled = false;
+        const finishResolve = () => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeoutId);
+          resolve();
+        };
+        const finishReject = (err) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeoutId);
+          reject(err);
+        };
+        const timeoutId = setTimeout(() => {
+          const elapsed = (performance.now() - runStart) / 1000;
+          if (frameCount < MIN_FRAMES_BY_TIMEOUT) {
+            finishReject(new Error(
+              `Video-element encode made limited progress (${frameCount} frames in ${elapsed.toFixed(0)}s). Falling back to ffmpeg.wasm.`
+            ));
+          }
+        }, MAX_WALLCLOCK_SEC * 1000);
         let lastMediaTime = -1;
         const onFrame = (now, metadata) => {
-          if (pipelineError) return reject(pipelineError);
+          if (pipelineError) return finishReject(pipelineError);
           try {
             // Skip duplicate timestamps (can happen at very high rates).
             if (metadata.mediaTime <= lastMediaTime) {
               if (!video.ended) video.requestVideoFrameCallback(onFrame);
-              else resolve();
+              else finishResolve();
               return;
             }
             lastMediaTime = metadata.mediaTime;
@@ -2073,19 +2135,19 @@
             if (elapsed > GUARD_SAMPLE_AFTER_SEC) {
               const fps = frameCount / elapsed;
               if (fps < MIN_FPS) {
-                return reject(new Error(
+                return finishReject(new Error(
                   `Video-element encode is too slow (${fps.toFixed(1)} fps after ${elapsed.toFixed(0)}s). Software encoder detected; ffmpeg.wasm will finish sooner.`
                 ));
               }
             }
 
             if (onProgress && frameCount % 10 === 0) onProgress(frameCount, totalFrames);
-          } catch (e) { return reject(e); }
+          } catch (e) { return finishReject(e); }
           if (!video.ended) video.requestVideoFrameCallback(onFrame);
-          else resolve();
+          else finishResolve();
         };
-        video.addEventListener("ended", () => resolve(), { once: true });
-        video.addEventListener("error", () => reject(new Error("video playback error")), { once: true });
+        video.addEventListener("ended", () => finishResolve(), { once: true });
+        video.addEventListener("error", () => finishReject(new Error("video playback error")), { once: true });
         video.requestVideoFrameCallback(onFrame);
       });
 
@@ -2525,6 +2587,12 @@
           log(`Primary WebCodecs path failed: ${wcErr.message || wcErr}`, "err");
         }
 
+        const tryVideoElementFallback = shouldTryVideoElementFallback(primaryError);
+        if (!tryVideoElementFallback) {
+          log("Skipping WebCodecs <video> fallback for this codec/browser combination; using ffmpeg.wasm directly.");
+          resetPhases();
+          clearError();
+        } else {
         // Attempt 2: <video> + rVFC fallback (handles HEVC 10-bit etc.)
         log("Trying WebCodecs fallback (<video> + rVFC)…");
         setStatus("Encoding video via <video> element + hardware VideoEncoder…");
@@ -2565,6 +2633,7 @@
           log(`Video-element WebCodecs path failed: ${veErr.message || veErr}. Falling back to ffmpeg.`, "err");
           resetPhases();
           clearError();
+        }
         }
       } else if (WEBCODECS_SUPPORTED && (op === "shrink" || op === "convert")) {
         log(`WebCodecs not eligible (${selectedFile.type || "unknown type"}) — using ffmpeg.wasm`);

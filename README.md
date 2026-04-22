@@ -21,13 +21,17 @@ python -m http.server 8000
 
 ## Deploy to GitHub Pages
 
+Live URL (this repo):
+- `https://lachlanallison.github.io/video-toolkit/`
+
 1. Commit the entire `video-toolkit/` folder to a GitHub repo.
 2. Repo → **Settings** → **Pages** → Build and deployment → **Deploy from a branch**. Pick `main` + `/ (root)` (or `/docs` if you move the folder).
-3. Wait for the Pages build, then open `https://<user>.github.io/<repo>/video-toolkit.html`.
+3. Wait for the Pages build, then open `https://lachlanallison.github.io/video-toolkit/`.
 
 If the repo root contains other files, you can point Pages at the `/video-toolkit` subfolder directly.
 
 ### Important files for Pages
+- `index.html` — root entrypoint for Pages; redirects to `video-toolkit.html`.
 - `video-toolkit.html` — the app.
 - `coi-serviceworker.js` — installs a service worker that adds `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` headers. Without it the page can't use `SharedArrayBuffer`, which means no multi-threaded ffmpeg.
 - `vendor/*` — same-origin copies of ffmpeg.wasm core files (`@ffmpeg/core@0.12.10`, `@ffmpeg/ffmpeg@0.12.15`). Avoids cross-origin `importScripts` failures in Firefox/Brave when third-party workers are blocked.

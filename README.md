@@ -35,6 +35,7 @@ python -m http.server 8000
 
 ## Notes
 
+- Social / X link previews use `og-image.png` (X does not use SVG for card images). Regenerate with `python scripts/generate-og-image.py` after editing the script.
 - Hardware acceleration is attempted via WebCodecs where supported.
 - `ffmpeg.wasm` remains the reliable fallback when codec/profile/browser support does not line up.
 - Cross-origin isolation is enabled via `coi-serviceworker.js` for MT + SIMD builds.
